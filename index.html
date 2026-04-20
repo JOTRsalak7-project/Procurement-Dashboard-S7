@@ -2071,6 +2071,166 @@ body, .header, .card, .stat-card, .nav-tabs, .nav-tab, .btn, .project-select,
               border-color var(--rx-dur) var(--rx-ease),
               box-shadow var(--rx-dur) var(--rx-ease) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   BUGFIX BLOCK — User feedback 2026-04-21
+   1. Export & Google Sheets dropdowns must layer above all page content
+   2. Procurement Packages search/filter/sort/count bar must stay sticky on scroll
+   3. Light mode: invisible white inline-styled text (PO numbers etc.) must be readable
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. DROPDOWN Z-INDEX FIX ─────────────────────────────────────────────────
+   Root cause: the earlier rule `.header, .main-content, body > * { z-index: 2 }`
+   puts header and main-content in the same stacking layer. Because main-content
+   comes LATER in the DOM, it paints above the header's dropdown content.
+   Fix: raise the header's stacking context well above siblings, and give dropdowns
+   an even higher local z-index. `overflow: visible` on header ensures dropdowns
+   are never clipped. */
+.header {
+  z-index: 500 !important;       /* above .main-content (z:2) and the view-only banner */
+  overflow: visible !important;  /* never clip dropdown that drops below header */
+}
+.header-actions,
+.header-top,
+.header-content {
+  overflow: visible !important;  /* propagate; flex containers can otherwise clip */
+}
+/* The dropdown wrappers themselves: a high local z-index so a hovering stat card
+   (which uses translateY transform -> new stacking context) never wins. */
+.export-dropdown,
+.data-dropdown {
+  position: relative;
+  z-index: 600;
+}
+.export-dropdown-content,
+.data-dropdown-content {
+  z-index: 2000 !important;      /* well above any hover-transformed card */
+}
+/* Banner between header and main — strip its implicit z-index so it cannot
+   cover the dropdown that overhangs down from the header. */
+body > div[style*="VIEW-ONLY"],
+body > div[style*="background:linear-gradient(90deg,rgba(20,184,166,0.15)"] {
+  z-index: 1 !important;
+  position: relative;
+}
+/* Main content sits below the header's stacking layer. */
+.main-content { z-index: 2 !important; }
+
+/* ── 2. PROCUREMENT PACKAGES STICKY HEADER FIX ───────────────────────────────
+   Goal: the "Procurement Packages" title + search + discipline filter + sort
+   selector + the "N packages shown • Sorted by: X" count bar all stay pinned
+   at the top while scrolling through the package cards.
+   Approach: a dedicated #pkgCardsCountBar slot has been added inside
+   #pkgStickyHeader (see the HTML). renderPackagesCards() writes into it directly
+   so the count bar physically lives inside the sticky container and scrolls
+   with the rest of the header as a single unit — no brittle :nth-child tricks. */
+
+/* The packages tab container itself must not create a clipping stacking context.
+   Also ensure the tab-content fade-up animation is disabled on the sticky
+   elements because `transform` during animation breaks `position: sticky`. */
+#packages {
+  position: relative;
+  overflow: visible;
+}
+#packages.tab-content.active > * {
+  animation: none !important;  /* sticky + transform animation conflict */
+}
+
+/* Main sticky bar: title + search + discipline + sort.
+   top offset accounts for the main .header (~150px desktop, shorter on mobile).
+   We use a CSS variable so we can tune both here and on mobile.               */
+:root { --pkg-header-offset: 156px; }
+@media (max-width: 900px) { :root { --pkg-header-offset: 200px; } }
+@media (max-width: 600px) { :root { --pkg-header-offset: 240px; } }
+
+#pkgStickyHeader {
+  position: sticky !important;
+  top: var(--pkg-header-offset) !important;
+  z-index: 25 !important;
+  /* give it a solid backdrop so content below scrolls UNDER it, not through it */
+  background: rgba(13, 15, 18, 0.94) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+  backdrop-filter: blur(14px) saturate(130%);
+  border-bottom: 1px solid var(--rx-hairline-hi) !important;
+  box-shadow: 0 4px 16px -8px rgba(0,0,0,0.35);
+}
+html[data-theme="light"] #pkgStickyHeader {
+  background: rgba(250, 247, 241, 0.94) !important;
+  border-bottom-color: var(--rx-hairline-hi) !important;
+  box-shadow: 0 4px 14px -8px rgba(45, 35, 20, 0.12);
+}
+/* Title inside it — make sure readable in light mode (inline style had color:white) */
+html[data-theme="light"] #pkgStickyHeader h2 {
+  color: var(--rx-ink) !important;
+}
+
+/* Count bar slot INSIDE #pkgStickyHeader — populated by renderPackagesCards().
+   Because it sits inside the sticky container, it scrolls with the search/filter
+   row automatically. We only need to handle light-mode color legibility for the
+   inline styles the JS injects (#e2e8f0, #94a3b8, #334155, #14b8a6, #60a5fa). */
+#pkgCardsCountBar { line-height: 1.4; }
+html[data-theme="light"] #pkgCardsCountBar {
+  color: var(--rx-ink-soft) !important;
+  border-top-color: var(--rx-hairline) !important;
+}
+html[data-theme="light"] #pkgCardsCountBar [style*="color:#e2e8f0"],
+html[data-theme="light"] #pkgCardsCountBar [style*="color: #e2e8f0"] {
+  color: var(--rx-ink) !important;
+}
+html[data-theme="light"] #pkgCardsCountBar [style*="color:#94a3b8"],
+html[data-theme="light"] #pkgCardsCountBar [style*="color: #94a3b8"] {
+  color: var(--rx-ink-soft) !important;
+}
+html[data-theme="light"] #pkgCardsCountBar [style*="color:#334155"],
+html[data-theme="light"] #pkgCardsCountBar [style*="color: #334155"] {
+  color: var(--rx-hairline-hi) !important;
+}
+/* Mobile: count bar gets its own line when header wraps */
+@media (max-width: 600px) {
+  #pkgCardsCountBar { font-size: 0.72rem !important; }
+}
+
+/* ── 3. LIGHT MODE — fix invisible white/near-white inline text ──────────────
+   The JS renders rows with inline `style="color:white"` and `color:#fff` (for
+   package names / PO numbers in the Dashboard "All Packages" table and
+   elsewhere). In dark mode that's correct; in light mode it produces white
+   text on cream → invisible (user's Image 3).
+   We override common white/near-white inline colors the same way the existing
+   code already overrides teal inline colors. */
+html[data-theme="light"] [style*="color:white"],
+html[data-theme="light"] [style*="color: white"],
+html[data-theme="light"] [style*="color:#fff"],
+html[data-theme="light"] [style*="color: #fff"],
+html[data-theme="light"] [style*="color:#ffffff"],
+html[data-theme="light"] [style*="color: #ffffff"],
+html[data-theme="light"] [style*="color:#FFFFFF"],
+html[data-theme="light"] [style*="color: #FFFFFF"] {
+  color: var(--rx-ink) !important;
+}
+/* Light-gray secondary text colors used in the same table cells
+   (vendor, COO columns use color:#cbd5e1 and #94a3b8) — bump to readable. */
+html[data-theme="light"] .data-table td[style*="color:#cbd5e1"],
+html[data-theme="light"] .data-table td[style*="color: #cbd5e1"] {
+  color: var(--rx-ink-soft) !important;
+}
+html[data-theme="light"] .data-table td [style*="color:#94a3b8"],
+html[data-theme="light"] .data-table td [style*="color: #94a3b8"] {
+  color: var(--rx-ink-mute) !important;
+}
+/* Button text that was set to white in buttons with dark backgrounds — keep
+   white ONLY on the primary gradient buttons (which already have dark bg in
+   light mode too). Scope the override to non-button elements only.           */
+html[data-theme="light"] .btn[style*="color:white"],
+html[data-theme="light"] .btn[style*="color: white"],
+html[data-theme="light"] button[style*="background:linear-gradient"][style*="color:white"] {
+  color: #fdfaf2 !important;  /* keep legible on dark gradient button */
+}
+/* Ensure the Google Sheets label inside the header sync button stays white in
+   light mode too — its parent button has a dark teal gradient. */
+html[data-theme="light"] #headerSyncBtn,
+html[data-theme="light"] #headerSyncBtn * {
+  color: #ffffff !important;
+}
 </style>
 </head>
 <body>
@@ -2330,7 +2490,7 @@ body, .header, .card, .stat-card, .nav-tabs, .nav-tab, .btn, .project-select,
         </div>
 
         <div id="packages" class="tab-content" style="position:relative;">
-            <div id="pkgStickyHeader" style="position:sticky;top:0;z-index:15;background:#0f172a;padding:0.75rem 1.5rem;margin:-1.5rem -1.5rem 1rem -1.5rem;border-bottom:1px solid #1e293b;">
+            <div id="pkgStickyHeader" style="position:sticky;top:0;z-index:15;background:#0f172a;padding:0.75rem 1.5rem 0.5rem;margin:-1.5rem -1.5rem 1rem -1.5rem;border-bottom:1px solid #1e293b;">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.75rem;">
                     <h2 style="font-size:1.35rem;font-weight:700;color:white;margin:0;white-space:nowrap;">Procurement Packages</h2>
                     <div style="display:flex;align-items:center;gap:0.75rem;flex:1;justify-content:flex-end;">
@@ -2358,6 +2518,8 @@ body, .header, .card, .stat-card, .nav-tabs, .nav-tab, .btn, .project-select,
                         
                     </div>
                 </div>
+                <!-- Count/Sort status bar — populated by renderPackagesCards(), kept inside sticky header -->
+                <div id="pkgCardsCountBar" style="margin-top:0.55rem;padding-top:0.5rem;border-top:1px solid rgba(51,65,85,0.4);font-size:0.8rem;color:#94a3b8;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-height:1.5rem;"></div>
             </div>
             <div id="packagesCards"></div>
         </div>
@@ -4551,13 +4713,17 @@ function afterProjectSave(proj) {
             if (cardDisc) pkgs = pkgs.filter(p => p.discipline === cardDisc);
             pkgs = applyPackageSort(pkgs, sortBy);
             const sortLabels = {input:'Input Order',discipline:'Discipline',vendor:'Vendor',po_date:'PO Date',po_no:'PO Number',mfg_progress_asc:'Progress ↑',mfg_progress_desc:'Progress ↓'};
-            const countBar = '<div style="padding:0.5rem 0 0.75rem;font-size:0.8rem;color:#94a3b8;display:flex;align-items:center;gap:0.5rem;">' +
-                '<span style="color:#e2e8f0;font-weight:600;">'+pkgs.length+' package'+(pkgs.length!==1?'s':'')+' shown</span>' +
+            // Count bar now lives INSIDE #pkgStickyHeader (slot: #pkgCardsCountBar) so it
+            // stays visible while scrolling the packages list. No leading/trailing padding
+            // here since the sticky header already wraps it.
+            const countBarHtml =
+                '<span class="pkg-count-text" style="color:#e2e8f0;font-weight:600;">'+pkgs.length+' package'+(pkgs.length!==1?'s':'')+' shown</span>' +
                 '<span style="color:#334155;">•</span>' +
                 '<span>Sorted by: <span style="color:#14b8a6;font-weight:500;">'+(sortLabels[sortBy]||sortBy)+'</span></span>' +
-                (cardDisc ? '<span style="color:#334155;">•</span><span>Discipline: <span style="color:#60a5fa;font-weight:500;">'+cardDisc+'</span></span>' : '') +
-                '</div>';
-            document.getElementById('packagesCards').innerHTML = countBar + pkgs.map((p, idx) => {
+                (cardDisc ? '<span style="color:#334155;">•</span><span>Discipline: <span style="color:#60a5fa;font-weight:500;">'+cardDisc+'</span></span>' : '');
+            const countSlot = document.getElementById('pkgCardsCountBar');
+            if (countSlot) { countSlot.innerHTML = countBarHtml; }
+            document.getElementById('packagesCards').innerHTML = pkgs.map((p, idx) => {
                 const plan = calculateSCurve(p.manufacture.planStart, p.manufacture.planFinish);
                 
                 // Check missing plan dates
